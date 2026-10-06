@@ -5,6 +5,7 @@ local HEALTH_SCORE_SCALE = 10
 local FRIENDLY_ON_WALL_SCORE = -100000
 local ENEMY_ON_WALL_SCORE = 10
 local IS_TOWER_BONUS = 4
+local TOWER_BELONGING_TO_ENEMY_BONUS = 5
 -- END SCORING
 
 local UNIT_ON_WALL_DISTANCE = 10
@@ -28,6 +29,13 @@ end
 ---@return number
 function fromHealth(health)
     return HEALTH_SCORE_SCALE - HEALTH_SCORE_SCALE * health
+end
+
+---@param building battle_building
+---@return number
+function fromTowerBelongingToPlayer(building)
+    if building:alliance_owner_id() == bm:get_player_alliance_num() then return TOWER_BELONGING_TO_ENEMY_BONUS end
+    return 0
 end
 
 ---@param x number
@@ -122,7 +130,7 @@ function score_fort_towers(scored_buildings, unit_x, unit_z)
                 local distance = distance_between_points(unit_x, unit_z, building_x, building_z)
                 scored_buildings[#scored_buildings + 1] = {
                     building = building,
-                    score = fromDistance(distance) + fromHealth(building:health()) + IS_TOWER_BONUS,
+                    score = fromDistance(distance) + fromHealth(building:health()) + IS_TOWER_BONUS + fromTowerBelongingToPlayer(building),
                 }
                 local position = building:position()
                 -- output_log_anian(VERBOSE_LOGS, "scoring: " .. tostring(building:name()) .. " at: " ..tostring(position:get_x() .." + " ..tostring(position:get_y())))
@@ -155,6 +163,7 @@ function score_fort_walls(scored_buildings, unit_x, unit_z)
             elseif building_x and building_z then
                 local distance = distance_between_points(unit_x, unit_z, building_x, building_z)
                 local units_score = on_wall_score(building)
+
                 scored_buildings[#scored_buildings + 1] = {
                     building = building,
                     score = fromDistance(distance) + fromHealth(building:health()) + units_score,

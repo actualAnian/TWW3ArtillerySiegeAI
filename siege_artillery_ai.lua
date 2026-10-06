@@ -2,15 +2,62 @@ LOGS = true
 VERBOSE_LOGS = true
 
 local LOG_PREFIX = "anian siege artillery ai: "
+local LOG_FILE_NAME = "siege_artillery_ai.log"
+
+---@type file*|nil
+local log_file = nil
+local log_open_attempted = false
+
+---@return string
+local function log_timestamp()
+    if not os or not os.date then return "" end
+    return "[" .. os.date("%H:%M:%S") .. "] "
+end
+
+local function close_log_file()
+    if not log_file then return end
+    pcall(function() log_file:close() end)
+    log_file = nil
+end
+
+local function open_log_file()
+    if log_open_attempted then return end
+    log_open_attempted = true
+    if not io or not io.open then return end
+    local opened = pcall(function()
+        log_file = io.open(LOG_FILE_NAME, "w")
+    end)
+    if not opened then log_file = nil end
+end
+
+---@param full_message string
+local function write_to_script_log(full_message)
+    if not bm or not bm.out then return end
+    pcall(function() bm:out(full_message) end)
+end
+
+---@param full_message string
+local function write_log_line(full_message)
+    open_log_file()
+    if not log_file then
+        write_to_script_log(full_message)
+        return
+    end
+    local line = log_timestamp() .. full_message .. "\n"
+    local written, write_result = pcall(function() return log_file:write(line) end)
+    if not written or not write_result then
+        close_log_file()
+        write_to_script_log(full_message)
+        return
+    end
+    pcall(function() log_file:flush() end)
+end
 
 ---@param log_type boolean
 ---@param message string
 function output_log_anian(log_type, message)
     if not log_type then return end
-    local full_message = LOG_PREFIX .. tostring(message)
-    if bm and bm.out then
-        pcall(function() bm:out(full_message) end)
-    end
+    write_log_line(LOG_PREFIX .. tostring(message))
 end
 
 local AMMO_DEPLETED_THRESHOLD = 0.10
@@ -208,9 +255,6 @@ local function tick()
         if siege_state.passed_ticks == 0 then
             initialize_on_first_tick()
         end
-        for _, group in ipairs(siege_state.artillery_groups) do
-            group:CheckIfGroupIdle()
-        end
 
         for index, group in ipairs(siege_state.artillery_groups) do
             output_log_anian(VERBOSE_LOGS, "artillery group- " ..index .." amount: " ..group:UnitCount())
@@ -218,6 +262,7 @@ local function tick()
         end
         output_log_anian(VERBOSE_LOGS, "tick: " ..siege_state.passed_ticks .." went all the way")
         siege_state.passed_ticks = siege_state.passed_ticks + 1
+        if siege_state.passed_ticks % 50 == 0 then initialize_on_first_tick() end
     end)
     if not ok then output_log_anian(LOGS, "ERROR IN TICK: " .. tostring(err)) end
 end
@@ -233,6 +278,9 @@ local function initialize()
          end
         -- output_log_anian(LOGS, "battle manager available, registering tick callback")
         bm:repeat_callback(function() tick() end, TICK_INTERVAL_MS)
+        if bm.register_phase_change_callback then
+            bm:register_phase_change_callback("Complete", close_log_file)
+        end
     end
     end)
     if not ok then output_log_anian(LOGS, "ERROR IN TICK: " .. tostring(err)) end

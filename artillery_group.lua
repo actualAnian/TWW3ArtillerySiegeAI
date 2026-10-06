@@ -95,20 +95,12 @@ function ArtilleryGroup:InheritStateFrom(previous)
     self.ticks_since_target_change = previous.ticks_since_target_change
 end
 
-function ArtilleryGroup:CheckIfGroupIdle()
-    if not self.target then return end
-        self.ticks_since_target_change = self.ticks_since_target_change + 1
-        if self.ticks_since_target_change >= TICKS_BEFORE_ARTILLERY_GROUP_CHECK then
-        if self:AreAllUnitsIdle() then
-            mark_untargetable(self.target)
-        end
-    end
-end
-
-
 function ArtilleryGroup:HandleTargetSelection()
     self.ticks_since_target_change = self.ticks_since_target_change + 1
     if self.ticks_since_target_change >= TICKS_BEFORE_ARTILLERY_GROUP_CHECK then
+        if self.target:health() == 1 then
+            output_log_anian(LOGS, "not shooting target, what is happening " ..tostring(self.__index))
+        end
         if self:AreAllUnitsIdle() then
             mark_untargetable(self.target)
         end
