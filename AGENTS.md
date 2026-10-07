@@ -21,3 +21,11 @@ C does the actual work
 I have an object that has a vector field Vector(x,y,z)
 I need x,y
 instead of using vector, I create myClass(x,y)
+
+### known issues
+
+math.huge does not exist, use ANIAN_MAX_INT_VALUE instead
+
+### after changes
+run .\MoveFilesToPack.ps1
+always tell that you have done it

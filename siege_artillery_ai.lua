@@ -1,9 +1,9 @@
 LOGS = true
 VERBOSE_LOGS = true
-
+ANIAN_MAX_INT_VALUE = 999999
 local LOG_PREFIX = "anian siege artillery ai: "
 local LOG_FILE_NAME = "siege_artillery_ai.log"
-
+local has_deployed = false
 ---@type file*|nil
 local log_file = nil
 local log_open_attempted = false
@@ -68,13 +68,16 @@ local ARTILLERY_GROUP_DISTANCE = 80
 ---@class SiegeState
 ---@field artillery_groups ArtilleryGroup[]
 ---@field script_unit_cache table<battle_unit, script_unit>
+---@field artillery_units table<battle_unit, ArtilleryUnit>
 ---@field untargetable UntargetableEntry[]
+---@field wall_positions battle_vector[]|nil computed once on first use, cleared by reset_siege_state
 ---@field passed_ticks number
 ---@return SiegeState
 local function new_siege_state()
     return {
         artillery_groups = {},
         script_unit_cache = {},
+        artillery_units = {},
         untargetable = {},
         passed_ticks = 0
     }
@@ -83,7 +86,6 @@ end
 ---@type SiegeState
 siege_state = new_siege_state()
 
----@return SiegeState
 function reset_siege_state()
     siege_state = new_siege_state()
 end
@@ -116,10 +118,9 @@ function distance_between_points(first_x, first_z, second_x, second_z)
     return math.sqrt(delta_x * delta_x + delta_z * delta_z)
 end
 
----@param vector battle_vector|nil guards buildings without a position
----@return number|nil, number|nil
+---@param vector battle_vector
+---@return number, number
 function vector_to_coordinates(vector)
-    if not vector then return nil, nil end
     local x_coordinate = vector:get_x()
     local z_coordinate = vector:get_z()
     return x_coordinate, z_coordinate
@@ -135,7 +136,14 @@ local function collect_ai_artillery_units()
 
     local army_list = ai_alliance:armies()
     if not army_list then return artillery_units end
-
+output_log_anian(LOGS, "collect artillery")
+output_log_anian(LOGS, "ai_alliance: " .. tostring(ai_alliance))
+output_log_anian(LOGS, "army_list: " .. tostring(army_list))
+output_log_anian(LOGS, "army_list type: " .. type(army_list))
+output_log_anian(LOGS, "count member: " .. tostring(army_list.count))
+output_log_anian(LOGS, "count member type: " .. type(army_list.count))
+output_log_anian(LOGS, "count() result: " .. tostring(army_list:count()))
+output_log_anian(LOGS, "count() result type: " .. type(army_list:count()))
     for army_index = 1, army_list:count() do
         local army = army_list:item(army_index)
         if army then
@@ -158,6 +166,7 @@ function anian_release_script_unit_control(script_unit_object)
     output_log_anian(VERBOSE_LOGS, "releasing control of unit: " ..script_unit_object.unit:name())
     script_unit_object:release_control()
     siege_state.script_unit_cache[script_unit_object.unit] = nil
+    siege_state.artillery_units[script_unit_object.unit] = nil
 end
 
 ---@param unit battle_unit
@@ -173,30 +182,41 @@ local function script_unit_for_unit(unit)
     return script_unit_object
 end
 
----@param first_script_unit script_unit
----@param second_script_unit script_unit
+---@param unit battle_unit
+---@return ArtilleryUnit
+local function artillery_unit_for_unit(unit)
+    local cached_artillery_unit = siege_state.artillery_units[unit]
+    if cached_artillery_unit then return cached_artillery_unit end
+
+    local artillery_unit = ArtilleryUnit:new(script_unit_for_unit(unit))
+    siege_state.artillery_units[unit] = artillery_unit
+    return artillery_unit
+end
+
+---@param first_artillery_unit ArtilleryUnit
+---@param second_artillery_unit ArtilleryUnit
 ---@return number
-local function distance_between_units(first_script_unit, second_script_unit)
-    local first_x, first_z = vector_to_coordinates(first_script_unit.unit:position())
-    local second_x, second_z = vector_to_coordinates(second_script_unit.unit:position())
-    if not first_x or not first_z or not second_x or not second_z then return math.huge end
+local function distance_between_artillery_units(first_artillery_unit, second_artillery_unit)
+    local first_x, first_z = first_artillery_unit:Position()
+    local second_x, second_z = second_artillery_unit:Position()
+    if not first_x or not first_z or not second_x or not second_z then return ANIAN_MAX_INT_VALUE end
     return distance_between_points(first_x, first_z, second_x, second_z)
 end
 
----@return script_unit[]
+---@return ArtilleryUnit[]
 local function collect_ready_artillery_units()
-    local ready_script_units = {}
+    local ready_artillery_units = {}
     for _, unit in ipairs(collect_ai_artillery_units()) do
         if can_attack_buildings(unit) then
-            ready_script_units[#ready_script_units + 1] = script_unit_for_unit(unit)
+            ready_artillery_units[#ready_artillery_units + 1] = artillery_unit_for_unit(unit)
         else
             anian_release_script_unit_control(script_unit_for_unit(unit))
         end
     end
-    return ready_script_units
+    return ready_artillery_units
 end
 
----@param members script_unit[]
+---@param members ArtilleryUnit[]
 ---@param previous_groups ArtilleryGroup[]
 ---@return ArtilleryGroup|nil no previous group shares a member
 local function find_previous_group(members, previous_groups)
@@ -208,25 +228,25 @@ local function find_previous_group(members, previous_groups)
     return nil
 end
 
----@param script_units script_unit[]
+---@param artillery_units ArtilleryUnit[]
 ---@param previous_groups ArtilleryGroup[]
 ---@return ArtilleryGroup[]
-local function build_artillery_groups(script_units, previous_groups)
+local function build_artillery_groups(artillery_units, previous_groups)
     local groups = {}
     local assigned = {}
 
-    for _, script_unit_object in ipairs(script_units) do
-        if not assigned[script_unit_object] then
-            local members = {script_unit_object}
-            assigned[script_unit_object] = true
+    for _, artillery_unit in ipairs(artillery_units) do
+        if not assigned[artillery_unit] then
+            local members = {artillery_unit}
+            assigned[artillery_unit] = true
 
             local group_index = 1
             while group_index <= #members do
                 local member = members[group_index]
-                for _, candidate in ipairs(script_units) do
-                    local distance = distance_between_units(member, candidate)
+                for _, candidate in ipairs(artillery_units) do
+                    local distance = distance_between_artillery_units(member, candidate)
                     if not assigned[candidate] and distance < ARTILLERY_GROUP_DISTANCE then
-                        output_log_anian(VERBOSE_LOGS, "assigning: " ..member.unit:name() .." to group " ..tostring(group_index))
+                        output_log_anian(VERBOSE_LOGS, "assigning: " ..member:Name() .." to group " ..tostring(group_index))
                         assigned[candidate] = true
                         members[#members + 1] = candidate
                     end
@@ -244,14 +264,14 @@ local function build_artillery_groups(script_units, previous_groups)
 end
 
 local function initialize_on_first_tick()
-    local ready_script_units = collect_ready_artillery_units()
-    siege_state.artillery_groups = build_artillery_groups(ready_script_units, siege_state.artillery_groups)
+    local ready_artillery_units = collect_ready_artillery_units()
+    siege_state.artillery_groups = build_artillery_groups(ready_artillery_units, siege_state.artillery_groups)
 end
 
 local function tick()
     local ok, err = pcall(function()
         if not bm:is_siege_battle() then return end -- doesnt work if the check happens in initialize
-        output_log_anian(VERBOSE_LOGS, "tick start: " ..siege_state.passed_ticks )
+        if not has_deployed then return end
         if siege_state.passed_ticks == 0 then
             initialize_on_first_tick()
         end
@@ -260,7 +280,6 @@ local function tick()
             output_log_anian(VERBOSE_LOGS, "artillery group- " ..index .." amount: " ..group:UnitCount())
             group:HandleTargetSelection()
         end
-        output_log_anian(VERBOSE_LOGS, "tick: " ..siege_state.passed_ticks .." went all the way")
         siege_state.passed_ticks = siege_state.passed_ticks + 1
         if siege_state.passed_ticks % 50 == 0 then initialize_on_first_tick() end
     end)
@@ -270,6 +289,7 @@ end
 local function initialize()
     -- for some reason the logs are not showing when in this method
     local ok, err = pcall(function()
+    has_deployed = false
     reset_siege_state()
     if bm then
         if bm:player_is_attacker() then
@@ -305,3 +325,9 @@ local function initialize()
 end
 
 initialize()
+bm:register_phase_change_callback(
+    "Deployed",
+    function()
+        has_deployed = true
+    end
+)

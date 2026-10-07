@@ -26,15 +26,11 @@ local function collect_candidate_spawn_zones(ai_alliance)
         local zone = reinforcements:spawn_zone(index)
         if zone then
             local zone_x, zone_z = vector_to_coordinates(zone:position())
-            output_log_anian(LOGS, "zone: " ..index .." posX: " ..zone_x .."posZ: " ..zone_z)
-            output_log_anian(LOGS, "has reinforcement line: " ..tostring(zone:has_reinforcement_line()))
-          
             if zone_x and zone_z then
                 local candidate = {zone = zone, x = zone_x, z = zone_z}
                 all_zones[#all_zones + 1] = candidate
                 if zone:can_be_used_by_alliance(ai_alliance) then
                     usable_zones[#usable_zones + 1] = candidate
-                    output_log_anian(LOGS, "can be used by alliance")
                 end
             end
         end
@@ -60,7 +56,6 @@ local function collect_ai_reinforcement_armies(ai_alliance)
             reinforcement_armies[#reinforcement_armies + 1] = reinforcement_army
         end
     end
-    output_log_anian(LOGS, "return from collect_ai_reinforcement_armies")
     return reinforcement_armies
 end
 
@@ -86,7 +81,6 @@ local function collect_first_army_positions(ai_alliance)
     --     end
     local vehicles_collection = bm:assault_equipment()
     -- end
-    output_log_anian(LOGS, "all vehicles: " ..vehicles_collection:vehicle_count())
 
     for i = 1, vehicles_collection:vehicle_count() do
     local equipment = vehicles_collection:vehicle_item(i)
@@ -150,7 +144,7 @@ local function assign_nearest_spawn_zones(centroid_x, centroid_z, remaining_cand
     for _, reinforcement_army in ipairs(reinforcement_armies) do
         if assigned_zone_by_army[reinforcement_army] == nil then
             local closest_index = nil
-            local closest_distance = 99999
+            local closest_distance = ANIAN_MAX_INT_VALUE
             for candidate_index, candidate in ipairs(remaining_candidates) do
                 local candidate_distance = distance_between_points(centroid_x, centroid_z, candidate.x, candidate.z)
                 if candidate_distance < closest_distance then

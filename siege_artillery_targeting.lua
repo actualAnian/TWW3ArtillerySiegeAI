@@ -61,7 +61,7 @@ end
 
 ---@param alliance battle_alliance|nil guards alliances missing on some battle types
 ---@return battle_unit[]
-local function get_alliance_units(alliance)
+function get_alliance_units(alliance)
     local units = {}
     if not alliance then return units end
 
@@ -125,7 +125,7 @@ function score_fort_towers(scored_buildings, unit_x, unit_z)
             and building:alliance_owner_id() ~= ai_alliance_id then
             local building_x, building_z = vector_to_coordinates(building:central_position())
             if is_untargetable(building_x, building_z) then
-                output_log_anian(VERBOSE_LOGS, "skipping untargetable: " .. tostring(building:name()))
+                -- output_log_anian(VERBOSE_LOGS, "skipping untargetable: " .. tostring(building:name()))
             elseif building_x and building_z then
                 local distance = distance_between_points(unit_x, unit_z, building_x, building_z)
                 scored_buildings[#scored_buildings + 1] = {
@@ -138,6 +138,29 @@ function score_fort_towers(scored_buildings, unit_x, unit_z)
             end
         end
     end
+end
+
+---@return battle_vector[]
+local function collect_wall_positions()
+    local positions = {}
+    local building_list = bm:get_fort_wall_buildings()
+    if not building_list then return positions end
+
+    for _, building in pairs(building_list) do
+        if building:health() > 0 then
+            local position = building:central_position()
+            if position then positions[#positions + 1] = position end
+        end
+    end
+    return positions
+end
+
+---@return battle_vector[]
+function get_wall_positions()
+    if not siege_state.wall_positions then
+        siege_state.wall_positions = collect_wall_positions()
+    end
+    return siege_state.wall_positions
 end
 
 ---@param scored_buildings ScoredBuilding[]
